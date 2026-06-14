@@ -76,6 +76,15 @@ CIFAR-10 Dataset (50K images, 32x32)
 └─────────────────────┘
 ---
 
+---
+
+## 🔄 Airflow Pipeline — Automated Retraining DAG
+
+![Airflow DAG](screenshots/airflow_dag.png)
+
+*8-task automated pipeline: validate GPU → prepare data → train 1000 epochs → evaluate quality → DPO alignment → quantize → benchmark → deploy*
+
+
 ## 📊 Key Results
 
 ### Inference Optimization Benchmark (RTX 5060 Ti)
