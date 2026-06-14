@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: diffusion-api-service
+spec:
+  selector:
+    app: diffusion-api           # routes traffic to pods with this label
+  ports:
+  - protocol: TCP
+    port: 8000                   # external port
+    targetPort: 8000             # pod's internal port
+  type: LoadBalancer             # exposes service externally

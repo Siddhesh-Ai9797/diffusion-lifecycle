@@ -1,0 +1,23 @@
+[
+  {
+    "timestamp": "2026-06-14T00:58:49.412026",
+    "num_images": 4,
+    "latency_ms": 2837.07,
+    "gpu_memory_mb": 19.86,
+    "confidence": 0.8526
+  },
+  {
+    "timestamp": "2026-06-14T00:59:20.752596",
+    "num_images": 6,
+    "latency_ms": 2501.06,
+    "gpu_memory_mb": 21.96,
+    "confidence": 0.6057
+  },
+  {
+    "timestamp": "2026-06-14T00:59:29.056466",
+    "num_images": 1,
+    "latency_ms": 2564.08,
+    "gpu_memory_mb": 17.14,
+    "confidence": 0.4849
+  }
+]

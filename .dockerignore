@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+outputs/model_epoch*.pt
+outputs/model_dpo.pt
+outputs/*.png
+outputs/*.onnx
+outputs/*.trt
+outputs/benchmark/
+mlruns/
+data/
+notebooks/
+*.ipynb
+.git/

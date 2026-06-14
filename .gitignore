@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Data (too large)
+data/
+
+# Large model checkpoints (keep only final ones)
+outputs/model_epoch*.pt
+outputs/model_dpo.pt
+outputs/scored_samples.pt
+outputs/benchmark_results.pt
+outputs/compile_benchmark_results.pt
+outputs/tensorrt_benchmark_results.pt
+outputs/benchmark/
+outputs/*.onnx
+outputs/*.trt
+outputs/_temp_model.pt
+
+# Keep these (small, important)
+# outputs/model_fp16.pt  ← ~4MB, keep
+# outputs/classifier.pt  ← small, keep
+
+# MLflow runs (large)
+mlruns/
+
+# Airflow logs
+airflow/logs/
+airflow/airflow.db
+
+# Environment
+.env
+*.env
+
+# VS Code
+.vscode/
+
+# Jupyter
+*.ipynb_checkpoints/
+
+# Misc
+*.pt.bak
+debug_test*.png
+check.py

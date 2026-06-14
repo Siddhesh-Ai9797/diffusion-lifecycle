@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diffusion-api
+  labels:
+    app: diffusion-api
+spec:
+  replicas: 2                    # run 2 pods (2 copies of your API)
+  selector:
+    matchLabels:
+      app: diffusion-api
+  template:
+    metadata:
+      labels:
+        app: diffusion-api
+    spec:
+      containers:
+      - name: diffusion-api
+        image: diffusion-api:latest    # our Docker image
+        imagePullPolicy: IfNotPresent         # use local image, don't pull from DockerHub
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"           # 0.5 CPU cores minimum
+          limits:
+            memory: "8Gi"
+            cpu: "2000m"          # 2 CPU cores maximum
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        readinessProbe:           # Kubernetes checks /health before sending traffic
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:            # Kubernetes restarts pod if /health fails 3 times
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          failureThreshold: 3
