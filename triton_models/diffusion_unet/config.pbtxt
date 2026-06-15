@@ -1,0 +1,36 @@
+name: "diffusion_unet"
+backend: "onnxruntime"
+max_batch_size: 16
+
+input [
+  {
+    name: "x"
+    data_type: TYPE_FP32
+    dims: [3, 32, 32]
+  },
+  {
+    name: "t"
+    data_type: TYPE_INT64
+    dims: [1]
+  }
+]
+
+output [
+  {
+    name: "noise_pred"
+    data_type: TYPE_FP32
+    dims: [3, 32, 32]
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [1, 4, 8, 16]
+  max_queue_delay_microseconds: 100
+}
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
