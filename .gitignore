@@ -43,4 +43,5 @@ airflow/airflow.db
 # Misc
 *.pt.bak
 debug_test*.png
-check.py
+check.py.pytest_cache/
+__pycache__/
