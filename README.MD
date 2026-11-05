@@ -1,142 +1,177 @@
-# Diffusion Model Lifecycle: Train → Align → Quantize → Serve
+# Diffusion Model Lifecycle
 
 [![CI](https://github.com/Siddhesh-Ai9797/diffusion-lifecycle/actions/workflows/ci.yml/badge.svg)](https://github.com/Siddhesh-Ai9797/diffusion-lifecycle/actions/workflows/ci.yml)
 
-> End-to-end production ML pipeline implementing DDPM diffusion model training, DPO preference alignment, inference optimization (TensorRT 2.57x speedup), and Dockerized FastAPI serving — with full MLOps stack (MLflow, Docker, Kubernetes, Airflow).
+A diffusion model built from scratch in PyTorch and taken all the way to production. It trains a DDPM on CIFAR-10, aligns it with DPO, speeds it up with torch.compile and TensorRT, and serves it through FastAPI and NVIDIA Triton on Kubernetes. An Airflow pipeline retrains it every week.
 
----
+No diffusion or alignment libraries are used. The noise schedule, U-Net, sampler and DPO loss are all written by hand.
 
-## 🎯 Project Overview
+<p align="center"><img src="outputs/scored_samples_grid.png" width="420" alt="100 generated CIFAR-10 style images"></p>
 
-This project builds a **complete diffusion model lifecycle** from scratch in PyTorch, targeting production ML engineering practices used at companies like Nvidia, Microsoft, and Google.
+## Results
 
-**Not a tutorial project** — every component is implemented from scratch:
-- DDPM forward/reverse process (no HuggingFace diffusers)
-- DPO alignment (no TRL library)
-- Manual quantization benchmarking
-- Custom inference optimization pipeline
+| Metric | Value |
+|---|---|
+| Fastest inference, TensorRT FP16 | 0.95s, **2.57x** faster than PyTorch |
+| torch.compile, reduce-overhead | **2.07x** faster, **31%** less GPU memory |
+| FP16 quantization | Model size 8.04 MB to 4.03 MB |
+| API latency | p50 2.56s, p95 2.84s |
+| Quality judge classifier | 77.7% accuracy on CIFAR-10 |
 
----
+Benchmarks were run on an RTX 5060 Ti.
 
-## 🏗️ Architecture
-CIFAR-10 Dataset (50K images, 32x32)
+## How it works
 
-│
+```mermaid
+flowchart LR
+    D[CIFAR-10] --> T[Train DDPM U-Net]
+    T --> J[Score samples with classifier]
+    J --> A[DPO alignment]
+    A --> Q[FP16 quantization]
+    Q --> O[ONNX export]
+    O --> TRT[TensorRT benchmark]
+    O --> TR[NVIDIA Triton]
+    Q --> F[FastAPI service]
+    F --> K[Kubernetes, 2 to 5 pods]
+    AF[Airflow, weekly] -.-> T
+```
 
-▼
-
-┌─────────────────────┐
-
-│   Stage 1: Train    │  DDPM U-Net (2.1M params)
-
-│   100 epochs        │  Noise schedule, MSELoss, Adam
-
-│   78,200 steps      │  MLflow tracked
-
-└─────────┬───────────┘
-
-│
-
-▼
-
-┌─────────────────────┐
-
-│   Stage 2: Align    │  DPO preference optimization
-
-│   (DPO)             │  Classifier quality judge (77.7% acc)
-
-│                     │  Fixed preference collapse bug
-
-└─────────┬───────────┘
-
-│
-
-▼
-
-┌─────────────────────┐
-
-│  Stage 3: Quantize  │  FP32 → FP16
-
-│                     │  2x size reduction (8MB → 4MB)
-
-│                     │  8% speedup, <5% quality drop
-
-└─────────┬───────────┘
-
-│
-
-▼
-
-┌─────────────────────┐
-
-│   Stage 4: Serve    │  FastAPI REST API
-
-│                     │  /health /generate /metrics
-
-│                     │  p50: 2.56s, p95: 2.84s latency
-
-└─────────────────────┘
----
-
----
-
-## 🔄 Airflow Pipeline — Automated Retraining DAG
+1. **Train.** A 2.1M parameter U-Net learns to predict the noise added to CIFAR-10 images over a 1,000 step schedule. Training runs for 100 epochs, about 78,200 steps, and every run is tracked in MLflow.
+2. **Judge.** A small CNN classifier scores each generated image. Its confidence works as a quality score.
+3. **Align.** The 50 best and 50 worst images become preference pairs for DPO. The model learns to make the preferred images more likely while a frozen copy keeps it from drifting too far.
+4. **Optimize.** The model is converted to FP16, compiled with torch.compile, and exported to ONNX and TensorRT.
+5. **Serve.** FastAPI serves images with live latency, confidence and GPU memory metrics. Triton serves the ONNX model with dynamic batching up to 16 requests. Kubernetes runs 2 pods and scales to 5 when CPU passes 70%.
+6. **Retrain.** An 8 task Airflow DAG runs every Sunday: check the GPU, prepare data, train, evaluate, run DPO, quantize, benchmark, and health check the API.
 
 ![Airflow DAG](screenshots/airflow_dag.png)
 
-*8-task automated pipeline: validate GPU → prepare data → train 1000 epochs → evaluate quality → DPO alignment → quantize → benchmark → deploy*
+## Benchmarks
 
+### Inference speed
 
-## 📊 Key Results
+| Mode | Time | Speedup |
+|---|---|---|
+| PyTorch eager | 2.43s | 1.00x |
+| torch.compile, reduce-overhead | 1.16s | 2.07x |
+| TensorRT FP32 | 0.96s | 2.53x |
+| **TensorRT FP16** | **0.95s** | **2.57x** |
 
-### Inference Optimization Benchmark (RTX 5060 Ti)
+### torch.compile modes
 
-| Mode | Time | Speedup | Notes |
-|------|------|---------|-------|
-| PyTorch Eager | 2.43s | 1.00x | Baseline |
-| torch.compile (reduce-overhead) | 1.16s | 2.07x | Zero code changes |
-| TensorRT FP32 | 0.96s | 2.53x | ONNX → TRT engine |
-| TensorRT FP16 | **0.95s** | **2.57x** | Best overall |
+| Mode | Time | Speedup | GPU memory |
+|---|---|---|---|
+| Eager | 2.41s | 1.00x | 53.8 MB |
+| Default | 1.61s | 1.50x | 49.1 MB |
+| **Reduce-overhead** | **1.16s** | **2.07x** | **36.9 MB** |
+| Max-autotune | 1.16s | 2.07x | 44.9 MB |
 
-### Architecture Benchmark (30 epochs each)
+### U-Net architectures, 30 epochs each
 
-| Architecture | Params | Epoch Time | Loss | Confidence | Visual Quality |
+| Architecture | Params | Epoch time | Loss | Confidence | Samples |
 |---|---|---|---|---|---|
-| Baseline CNN | 2.10M | 22.5s | 0.050 | 0.496 | ❌ Dark/collapsed |
-| Standard Attention | 2.17M | 22.8s | 0.044 | 0.543 | ✅ Good |
-| **Linear Attention** | **2.17M** | **23.4s** | **0.011** | **0.552** | **✅ Best** |
-| Mamba/SSM | 2.17M | 67.2s | 0.020 | 0.575 | ✅ Rich colors |
+| Baseline CNN | 2.10M | 22.5s | 0.050 | 0.496 | Dark, collapsed |
+| Self-attention | 2.17M | 22.8s | 0.044 | 0.543 | Good |
+| **Linear attention** | **2.17M** | **23.4s** | **0.011** | **0.552** | **Best** |
+| Mamba style SSM | 2.17M | 67.2s | 0.020 | 0.575 | Richest colors |
 
-### Quantization Results
+### Quantization
 
 | Precision | Size | Time | Confidence |
 |---|---|---|---|
 | FP32 | 8.04 MB | 2.82s | 0.664 |
-| FP16 | **4.03 MB** | **2.60s** | 0.632 |
+| **FP16** | **4.03 MB** | **2.60s** | 0.632 |
 
-### torch.compile Results
+### Triton load test
 
-| Mode | Time | Speedup | GPU Memory |
-|---|---|---|---|
-| Eager | 2.41s | 1.00x | 53.8 MB |
-| compile default | 1.61s | 1.50x | 49.1 MB |
-| **reduce-overhead** | **1.16s** | **2.07x** | **36.9 MB** |
-| max-autotune | 1.16s | 2.07x | 44.9 MB |
+`scripts/triton_perf.sh` runs NVIDIA perf_analyzer against Triton and raises concurrency from 1 to 16 so dynamic batching can group requests. It saves throughput and p50, p95 and p99 latency to `outputs/triton_perf.csv`.
 
----
+## What I learned
 
-### Triton Load Test
+**DPO can collapse a model.** My first DPO run used a learning rate of 1e-4, 30 epochs and beta 0.1. Every image turned into a solid color, because the mean pixel value drifted from about 0 to about 1. I found it by comparing checkpoints before and after DPO, in FP32 and FP16. A stronger anchor to the reference model, beta 1.0, and a gentler learning rate, 1e-5, fixed it.
 
-`scripts/triton_perf.sh` runs NVIDIA `perf_analyzer` against the Triton deployment and sweeps concurrency from 1 to 16 so dynamic batching can group requests. It writes throughput and p50, p95 and p99 latency to `outputs/triton_perf.csv`.
+**Mamba needs custom CUDA kernels.** The SSM block gave the best looking images but trained 3x slower. Its scan runs as a Python loop, one step at a time. Real Mamba uses a parallel scan written in CUDA, which is why hardware aware kernels matter for these models.
+
+**torch.compile saves memory, not just time.** Reduce-overhead mode fused many small operations into fewer CUDA kernels. That removed temporary tensors and cut GPU memory by 31%.
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Modeling | PyTorch, CUDA 12.8 |
+| Optimization | TensorRT, ONNX, torch.compile, FP16 |
+| Serving | FastAPI, NVIDIA Triton Inference Server |
+| MLOps | Docker, Kubernetes with autoscaling, Airflow, MLflow, GitHub Actions |
+
+## Project structure
+
+```
+src/
+  noise_schedule.py          Forward diffusion and beta schedule
+  unet.py                    Baseline U-Net, 2.1M parameters
+  unet_attention.py          U-Net with self-attention
+  unet_linear_attention.py   U-Net with linear attention
+  unet_mamba.py              U-Net with a Mamba style SSM block
+  train.py                   Training loop with MLflow
+  sample.py                  Reverse process to generate images
+  classifier.py              Quality judge CNN
+  score_samples.py           Generate and score images for DPO
+  dpo.py                     DPO alignment
+  quantize.py                FP32 vs FP16 benchmark
+  benchmark.py               Architecture comparison
+  compile_benchmark.py       torch.compile benchmark
+  tensorrt_benchmark.py      TensorRT benchmark
+  export_onnx_triton.py      ONNX export for Triton
+  serve.py                   FastAPI service with metrics
+triton_models/               Triton model repository and config
+k8s/                         Deployment, service and autoscaler
+airflow/dags/                Weekly retraining DAG
+scripts/triton_perf.sh       Triton load test
+tests/                       Unit, API and Triton contract tests
+```
+
+## Running it
+
+**Docker**
+
+```bash
+docker build -t diffusion-api .
+docker run --gpus all -p 8000:8000 diffusion-api
+curl -X POST "http://localhost:8000/generate?num_images=4" --output samples.png
+curl http://localhost:8000/metrics
+```
+
+**Locally**
+
+```bash
+pip install -r requirements.txt
+python -m src.train
+python -m src.dpo
+python -m src.quantize
+uvicorn src.serve:app
+```
+
+**Triton**
 
 ```bash
 docker compose -f docker-compose-triton.yml up -d
 bash scripts/triton_perf.sh
 ```
 
----
+**Kubernetes**
 
-## 🧪 Tests
+```bash
+kubectl apply -f k8s/
+```
+
+**Airflow**
+
+```bash
+docker compose -f docker-compose-airflow.yml up
+```
+
+Then open http://localhost:8080 and trigger the `diffusion_lifecycle_retrain` DAG.
+
+## Tests
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
@@ -144,158 +179,8 @@ pip install fastapi httpx mlflow onnx onnxruntime pytest
 python -m pytest -q
 ```
 
-The tests check the noise schedule, all four U-Net variants, the API, and the Triton deployment contract: the ONNX model's input and output names match `config.pbtxt`, its batch size is dynamic, and its outputs match the PyTorch weights. GitHub Actions runs them on every push.
+The tests cover the noise schedule, all four U-Net versions and the API. They also check the Triton setup: the ONNX input and output names match `config.pbtxt`, the batch size is dynamic, and the ONNX model gives the same output as the PyTorch weights. GitHub Actions runs them on every push.
 
----
+## Author
 
-## 🛠️ Tech Stack
-
-| Category | Tools |
-|---|---|
-| Deep Learning | PyTorch 2.7, CUDA 12.8 |
-| Model Serving | FastAPI, Uvicorn |
-| Inference Optimization | TensorRT 10.9, ONNX, torch.compile |
-| Experiment Tracking | MLflow |
-| Containerization | Docker (Nvidia CUDA base image) |
-| Orchestration | Kubernetes (2 pods, HPA autoscaler) |
-| Pipeline Automation | Apache Airflow (8-task DAG) |
-| Monitoring | Custom p50/p95/p99 latency tracking |
-
----
-
-## 📁 Project Structure
-diffusion-lifecycle/
-
-├── src/
-│   ├── noise_schedule.py        # Forward process, beta schedule
-│   ├── unet.py                  # Baseline CNN U-Net (2.1M params)
-│   ├── unet_attention.py        # + Standard self-attention
-│   ├── unet_linear_attention.py # + Linear attention (winner)
-│   ├── unet_mamba.py            # + Mamba/SSM block
-│   ├── dataset.py               # CIFAR-10 loading
-│   ├── train.py                 # Training loop (MLflow tracked)
-│   ├── sample.py                # DDIM-style reverse process
-│   ├── classifier.py            # Quality judge CNN
-│   ├── score_samples.py         # Generate + score 100 images
-│   ├── dpo.py                   # DPO alignment
-│   ├── quantize.py              # FP32 vs FP16 benchmark
-│   ├── benchmark.py             # Architecture comparison
-│   ├── compile_benchmark.py     # torch.compile optimization
-│   ├── tensorrt_benchmark.py    # TensorRT optimization
-│   └── serve.py                 # FastAPI + monitoring
-├── k8s/
-│   ├── deployment.yaml          # 2 replicas, health probes
-│   ├── service.yaml             # LoadBalancer port 8000
-│   └── hpa.yaml                 # Auto-scale 2-5 pods
-├── airflow/
-│   └── dags/
-│       └── diffusion_retrain.py # 8-task retraining pipeline
-├── outputs/
-│   ├── model_fp16.pt            # Production model (FP16, 4MB)
-│   └── classifier.pt            # Quality judge
-├── Dockerfile                   # Nvidia CUDA 12.8 container
-├── docker-compose-airflow.yml   # Airflow + PostgreSQL stack
-├── requirements.txt
-└── README.md
-
----
-
-## 🚀 Quick Start
-
-### Option 1: Docker (recommended)
-```bash
-# Build image
-docker build -t diffusion-api .
-
-# Run with GPU
-docker run --gpus all -p 8000:8000 diffusion-api
-
-# Test
-curl http://localhost:8000/health
-curl -X POST http://localhost:8000/generate?num_images=4
-curl http://localhost:8000/metrics
-```
-
-### Option 2: Local
-```bash
-conda activate ai-env
-python -m src.train          # Train model
-python -m src.sample         # Generate images
-python -m src.dpo            # DPO alignment
-python -m src.quantize       # Quantize to FP16
-uvicorn src.serve:app        # Start API
-```
-
-### Option 3: Kubernetes
-```bash
-kubectl apply -f k8s/
-kubectl get pods             # Check 2 pods running
-# Access at http://localhost:8000
-```
-
-### Option 4: Airflow Pipeline (automated)
-```bash
-docker-compose -f docker-compose-airflow.yml up
-# Open http://localhost:8080
-# Login: admin/admin
-# Trigger: diffusion_lifecycle_retrain DAG
-```
-
----
-
-## 🔬 Key Engineering Insights
-
-**1. DPO Preference Collapse (Debugging Story)**
-Initial DPO with `LR=1e-4, EPOCHS=30, BETA=0.1` caused model collapse — mean pixel value shifted from ~0 to ~1.0, producing solid-color outputs. Diagnosed via systematic checkpoint comparison (FP32 vs FP16, before/after DPO). Fixed via stronger KL-anchoring (`BETA=1.0`) and gentler updates (`LR=1e-5`).
-
-**2. Mamba Sequential Scan Bottleneck**
-Mamba/SSM achieved best visual quality but ran 3x slower than attention variants due to Python sequential scan loop. Real Mamba requires hardware-optimized CUDA parallel scan kernels — directly demonstrating why CUDA expertise matters for production SSM deployment.
-
-**3. torch.compile Memory Reduction**
-`reduce-overhead` mode reduced GPU memory by 31% (53.8MB → 36.9MB) via operator fusion — multiple PyTorch operations compiled into single CUDA kernel calls, eliminating intermediate tensor allocations.
-
----
-
-## 📈 Monitoring
-
-The API exposes real-time metrics at `/metrics`:
-
-```json
-{
-  "total_requests": 10,
-  "latency_ms": {
-    "p50": 2564,
-    "p95": 2837,
-    "p99": 2837
-  },
-  "confidence": {
-    "mean": 0.648,
-    "min": 0.485,
-    "max": 0.853
-  },
-  "gpu_memory_mb": {
-    "mean": 19.65,
-    "max": 21.96
-  }
-}
-```
-
----
-
-## 🎯 Nvidia Relevance
-
-| Nvidia Product/Team | This Project |
-|---|---|
-| TensorRT | TRT export pipeline (2.57x speedup) |
-| Triton Inference Server | ONNX export ready for Triton deployment |
-| Nvidia Metropolis | Diffusion for synthetic data generation |
-| MambaVision (NVlabs) | Mamba/SSM bottleneck implementation |
-| Nvidia Earth-2 | Diffusion model architecture knowledge |
-| DRIVE Platform | Sequential model understanding (RNN/LSTM/SSM) |
-
----
-
-## 👤 Author
-
-**Siddhesh Patil**
-MS Artificial Intelligence, DePaul University
+Siddhesh Patil, MS in Artificial Intelligence, DePaul University
