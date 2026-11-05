@@ -1,5 +1,7 @@
 # Diffusion Model Lifecycle: Train → Align → Quantize → Serve
 
+[![CI](https://github.com/Siddhesh-Ai9797/diffusion-lifecycle/actions/workflows/ci.yml/badge.svg)](https://github.com/Siddhesh-Ai9797/diffusion-lifecycle/actions/workflows/ci.yml)
+
 > End-to-end production ML pipeline implementing DDPM diffusion model training, DPO preference alignment, inference optimization (TensorRT 2.57x speedup), and Dockerized FastAPI serving — with full MLOps stack (MLflow, Docker, Kubernetes, Airflow).
 
 ---
@@ -120,6 +122,29 @@ CIFAR-10 Dataset (50K images, 32x32)
 | compile default | 1.61s | 1.50x | 49.1 MB |
 | **reduce-overhead** | **1.16s** | **2.07x** | **36.9 MB** |
 | max-autotune | 1.16s | 2.07x | 44.9 MB |
+
+---
+
+### Triton Load Test
+
+`scripts/triton_perf.sh` runs NVIDIA `perf_analyzer` against the Triton deployment and sweeps concurrency from 1 to 16 so dynamic batching can group requests. It writes throughput and p50, p95 and p99 latency to `outputs/triton_perf.csv`.
+
+```bash
+docker compose -f docker-compose-triton.yml up -d
+bash scripts/triton_perf.sh
+```
+
+---
+
+## 🧪 Tests
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+pip install fastapi httpx mlflow onnx onnxruntime pytest
+python -m pytest -q
+```
+
+The tests check the noise schedule, all four U-Net variants, the API, and the Triton deployment contract: the ONNX model's input and output names match `config.pbtxt`, its batch size is dynamic, and its outputs match the PyTorch weights. GitHub Actions runs them on every push.
 
 ---
 
